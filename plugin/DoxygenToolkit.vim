@@ -585,7 +585,7 @@ function! <SID>DoxygenCommentFunc()
   let l:count            = 1
   let l:endDocFound      = 0
 
-  let l:doc = { "type": "", "name": "None", "params": [], "returns": "" , "templates": [], "throws": [] }
+  let l:doc = { "type": "", "name": "None", "params": [], "returns": "", "rets":[] , "templates": [], "throws": [] }
 
   " Mark current line for future use
   mark d
@@ -663,6 +663,8 @@ function! <SID>DoxygenCommentFunc()
       let l:lineBuffer = substitute( l:lineBuffer, l:templateParameterPattern, "", "g" )
     endwhile
   endif
+
+  call s:ParseFunctionReturns( l:lineBuffer, l:doc )
 
   " Look for the type
   for key in keys( l:types )
@@ -780,7 +782,13 @@ function! <SID>DoxygenCommentFunc()
     if( g:DoxygenToolkit_compactDoc != "yes" )
       exec "normal o".substitute( s:interCommentTag, "[[:blank:]]*$", "", "" )
     endif
-    exec "normal o".s:interCommentTag.g:DoxygenToolkit_returnTag
+    if len(l:doc.rets) != 0
+        for returnValue in l:doc.rets
+            exec "normal o".s:interCommentTag.g:DoxygenToolkit_returnTag.returnValue
+        endfor
+    else
+        exec "normal o".s:interCommentTag.g:DoxygenToolkit_returnTag
+    endif
   endif
 
   " Exception (throw) values (cpp only)
@@ -891,6 +899,15 @@ endfunction
 " Retrieve file type.
 " - Default type is still 'cpp'.
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+function! s:CheckFileTypeEx()
+  if( &filetype == "go" )
+    let l:fileTypeEx       = "go"
+  else
+    let l:fileTypeEx       = "cpp"
+  endif
+  return l:fileTypeEx
+endfunction
+
 function! s:CheckFileType()
   if( &filetype == "python" )
     let l:fileType       = "python"
@@ -901,19 +918,61 @@ function! s:CheckFileType()
 endfunction
 
 
+function! s:ParseFunctionReturns( lineBuffer, doc )
+    if s:CheckFileTypeEx() != "go"
+        return
+    endif
+
+    let returnStart=matchend(a:lineBuffer,"func[[:blank:]]*([^)]*)[^(]*([^)]*)[[:blank:]]*")
+    if returnStart == -1
+        let returnStart=matchend(a:lineBuffer,"func[[:blank:]]*[^(]*([^)]*)[[:blank:]]*")
+    endif
+    if returnStart == -1
+        return
+    endif
+
+    let l:start = matchend(a:lineBuffer,"([[:blank:]]*",returnStart)
+    if l:start == -1
+        let l:end = match(a:lineBuffer,"[[:blank:]]*{",l:start)
+        let l:start = returnStart
+    else
+        let l:end = match(a:lineBuffer,")[[:blank:]]*{",l:start)
+    endif
+    let l:returnBuffer = strpart(a:lineBuffer,l:start,l:end-l:start)
+
+    let l:rets = split(l:returnBuffer,',')
+    for l:ret in l:rets
+        let l:retSegs = split(l:ret," ")
+        let l:retSegs = reverse(l:retSegs)
+        let l:ret = join(l:retSegs," ")
+        let a:doc.rets = add(a:doc.rets,l:ret)
+    endfor
+endfunction
+
+" let b='func (a *A)Func(p1 int,p2 string)(err error,ok bool){'
+" let b1='func Func(p1 int,p2 string)(err error,ok bool){'
+" let a=matchend(b,"func[[:blank:]]*([^)]*)[^(]*(")
+" let a1=matchend(b1,"func[[:blank:]]*[^(]*(")
+"   call s:WarnMsg( 'fuck 1 - '.strpart(b,a))
+"   call s:WarnMsg( 'fuck 2 - '.b)
+"   call s:WarnMsg( 'fuck 3 - '.strpart(b1,a1))
+
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Parse the buffer and set the doc parameter.
 " - Functions which return pointer to function are not supported.
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:ParseFunctionParameters( lineBuffer, doc )
-  "call s:WarnMsg( 'IN__'.a:lineBuffer )
+  " call s:WarnMsg( 'IN__'.a:lineBuffer )
   let l:paramPosition = matchend( a:lineBuffer, 'operator[[:blank:]]*([[:blank:]]*)' )
   if ( l:paramPosition == -1 )
-    let l:paramPosition = stridx( a:lineBuffer, '(' )
+      let l:paramPosition = stridx( a:lineBuffer, '(' )
+      if s:CheckFileTypeEx() == "go"
+        let l:tmp = strpart( a:lineBuffer, l:paramPosition + 1 )
+        let l:paramPosition = stridx(l:tmp , '(' ) + l:paramPosition + 1
+      endif
   else
     let l:paramPosition = stridx( a:lineBuffer, '(', l:paramPosition )
   endif
-
 
   " (cpp only) First deal with function name and returned value.
   " Function name has already been retrieved for Python and we need to parse
@@ -932,7 +991,13 @@ function! s:ParseFunctionParameters( lineBuffer, doc )
   endif
 
   " Work on parameters.
-  let l:parametersBuffer = strpart( a:lineBuffer, l:paramPosition + 1 )
+  " parametersBuffer从第一个参数开始
+  if s:CheckFileTypeEx() == "go"
+      let l:parametersEnd = stridx(a:lineBuffer,')',l:paramPosition)
+      let l:parametersBuffer = strpart( a:lineBuffer, l:paramPosition + 1, l:parametersEnd - l:paramPosition-1 )
+  else
+      let l:parametersBuffer = strpart( a:lineBuffer, l:paramPosition + 1) 
+  endif
   " Remove trailing closing bracket and everything that follows and trim.
   if( s:CheckFileType() == "cpp" )
     let l:parametersBuffer = substitute( l:parametersBuffer, ')[^)]*\%(;\|{\|\%([^:]:\%([^:]\|$\)\)\|\%(\<throw\>\)\).*', '', '' )
@@ -962,7 +1027,6 @@ function! s:ParseFunctionParameters( lineBuffer, doc )
     endif
   endwhile
 
-  "call s:WarnMsg( "[DEBUG]: ".l:parametersBuffer )
   " Now, work on each parameter.
   let l:params = []
   let l:index = stridx( l:parametersBuffer, ',' )
@@ -982,6 +1046,8 @@ function! s:ParseFunctionParameters( lineBuffer, doc )
 
   if( s:CheckFileType() == "cpp" )
     call filter( l:params, 'v:val !~ "void"' )
+  elseif( s:CheckFileType() == "go" )
+    call filter( l:params, 'v:val !~ "void"' )
   else
     if( g:DoxygenToolkit_python_autoRemoveSelfParam == "yes" )
       call filter( l:params, 'v:val !~ "self"' )
@@ -990,7 +1056,7 @@ function! s:ParseFunctionParameters( lineBuffer, doc )
 
   for param in l:params
     call add( a:doc.params, param )
-    "call s:WarnMsg( '[DEBUG]:OUT_'.param )
+    " call s:WarnMsg( '[DEBUG]:OUT_'.param )
   endfor
 endfunction
 
@@ -1004,7 +1070,12 @@ function! s:ParseParameter( param )
   let l:firstIndex = stridx( a:param, '(' )
 
   if( l:firstIndex == -1 )
-    let l:paramName =  split( a:param, '[[:blank:]*&]' )[-1]
+    if s:CheckFileTypeEx() == "go"
+        let l:paramNames =  split( a:param, ' ' )
+        let l:paramName =  l:paramNames[1]." ".l:paramNames[0]
+    else
+        let l:paramName =  split( a:param, '[[:blank:]*&]' )[-1]
+    endif
   else
     if( l:firstIndex != 0 )
       let l:startIndex = 0
@@ -1027,6 +1098,7 @@ function! s:ParseParameter( param )
       let l:startIndex = stridx( a:param, '(', l:startIndex ) + 1
       let l:endIndex = stridx( a:param, ')', l:startIndex + 1 )
       let l:param = strpart( a:param, l:startIndex, l:endIndex - l:startIndex )
+      " let l:paramName =  substitute( l:param, '^[[:blank:]*]*\|[[:blank:]*]*$', '', '' )
       let l:paramName =  substitute( l:param, '^[[:blank:]*]*\|[[:blank:]*]*$', '', '' )
     else
       " Something really wrong has happened.
