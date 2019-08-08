@@ -977,8 +977,10 @@ function! s:ParseFunctionParameters( lineBuffer, doc )
   if ( l:paramPosition == -1 )
       let l:paramPosition = stridx( a:lineBuffer, '(' )
       if s:CheckFileTypeEx() == "go"
-        let l:tmp = strpart( a:lineBuffer, l:paramPosition + 1 )
-        let l:paramPosition = stridx(l:tmp , '(' ) + l:paramPosition + 1
+        let l:paramPosition = matchend(a:lineBuffer,"func[[:blank:]]*([^)]*)[^(]*(")
+        if l:paramPosition == -1
+            let l:paramPosition = matchend(a:lineBuffer,"func[[:blank:]]*[^(]*(")
+        endif
       endif
   else
     let l:paramPosition = stridx( a:lineBuffer, '(', l:paramPosition )
@@ -988,23 +990,32 @@ function! s:ParseFunctionParameters( lineBuffer, doc )
   " Function name has already been retrieved for Python and we need to parse
   " all the function definition to know whether a value is returned or not.
   if( s:CheckFileType() == "cpp" )
-    let l:functionBuffer = strpart( a:lineBuffer, 0, l:paramPosition )
-    " Remove unnecessary elements
-    for ignored in g:DoxygenToolkit_ignoreForReturn
-      let l:functionBuffer = substitute( l:functionBuffer, '\<'.ignored.'\>', '', 'g' )
-    endfor
-    let l:functionReturnAndName = split( l:functionBuffer, '[[:blank:]*]' )
-    if( len( l:functionReturnAndName ) > 1 )
-      let a:doc.returns = 'yes'
-    endif
-    let a:doc.name = l:functionReturnAndName[-1]
+     if s:CheckFileTypeEx() == "go"
+        let l:namePosition = matchend(a:lineBuffer,"func[[:blank:]]*([^)]*)[[:blank:]]*")
+        if l:namePosition == -1
+            let l:namePosition = matchend(a:lineBuffer,"func[[:blank:]]*")
+        endif
+        let a:doc.name = matchstr(a:lineBuffer,"[^( ]*",l:namePosition)
+        let a:doc.returns = 'yes'
+     else
+        let l:functionBuffer = strpart( a:lineBuffer, 0, l:paramPosition )
+        " Remove unnecessary elements
+        for ignored in g:DoxygenToolkit_ignoreForReturn
+          let l:functionBuffer = substitute( l:functionBuffer, '\<'.ignored.'\>', '', 'g' )
+        endfor
+        let l:functionReturnAndName = split( l:functionBuffer, '[[:blank:]*]' )
+        if( len( l:functionReturnAndName ) > 1 )
+          let a:doc.returns = 'yes'
+        endif
+        let a:doc.name = l:functionReturnAndName[-1]
+      endif
   endif
 
   " Work on parameters.
   " parametersBuffer从第一个参数开始
   if s:CheckFileTypeEx() == "go"
       let l:parametersEnd = stridx(a:lineBuffer,')',l:paramPosition)
-      let l:parametersBuffer = strpart( a:lineBuffer, l:paramPosition + 1, l:parametersEnd - l:paramPosition-1 )
+      let l:parametersBuffer = strpart( a:lineBuffer, l:paramPosition, l:parametersEnd - l:paramPosition )
   else
       let l:parametersBuffer = strpart( a:lineBuffer, l:paramPosition + 1) 
   endif
@@ -1055,8 +1066,6 @@ function! s:ParseFunctionParameters( lineBuffer, doc )
   endif
 
   if( s:CheckFileType() == "cpp" )
-    call filter( l:params, 'v:val !~ "void"' )
-  elseif( s:CheckFileType() == "go" )
     call filter( l:params, 'v:val !~ "void"' )
   else
     if( g:DoxygenToolkit_python_autoRemoveSelfParam == "yes" )
