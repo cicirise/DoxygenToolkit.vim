@@ -279,6 +279,9 @@ let s:licenseTag = s:licenseTag . "along with this program; if not, write to the
 let s:licenseTag = s:licenseTag . "Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.\<enter>"
 
 " Common standard constants
+if !exists("g:DoxygenToolkit_language")
+  let g:DoxygenToolkit_language= "en"
+endif
 if !exists("g:DoxygenToolkit_briefTag_pre")
   let g:DoxygenToolkit_briefTag_pre = "@brief "
 endif
@@ -896,7 +899,7 @@ endfunction
 
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" Retrieve file type.
+" Retrieve file type. Specially adapter to go.
 " - Default type is still 'cpp'.
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:CheckFileTypeEx()
@@ -908,6 +911,10 @@ function! s:CheckFileTypeEx()
   return l:fileTypeEx
 endfunction
 
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Retrieve file type.
+" - Default type is still 'cpp'.
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:CheckFileType()
   if( &filetype == "python" )
     let l:fileType       = "python"
@@ -918,6 +925,10 @@ function! s:CheckFileType()
 endfunction
 
 
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Parse the buffer and set the doc returns.
+" - Functions which return pointer to function are not supported.
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 function! s:ParseFunctionReturns( lineBuffer, doc )
     if s:CheckFileTypeEx() != "go"
         return
@@ -945,17 +956,16 @@ function! s:ParseFunctionReturns( lineBuffer, doc )
         let l:retSegs = split(l:ret," ")
         let l:retSegs = reverse(l:retSegs)
         let l:ret = join(l:retSegs," ")
+        if match(l:ret,"error") != -1
+            if g:DoxygenToolkit_language == "zh"
+                let l:ret = l:ret." 函数执行结果，值为nil表示成功."
+            else
+                let l:ret = l:ret." function execute result, nil to be find."
+            endif
+        endif
         let a:doc.rets = add(a:doc.rets,l:ret)
     endfor
 endfunction
-
-" let b='func (a *A)Func(p1 int,p2 string)(err error,ok bool){'
-" let b1='func Func(p1 int,p2 string)(err error,ok bool){'
-" let a=matchend(b,"func[[:blank:]]*([^)]*)[^(]*(")
-" let a1=matchend(b1,"func[[:blank:]]*[^(]*(")
-"   call s:WarnMsg( 'fuck 1 - '.strpart(b,a))
-"   call s:WarnMsg( 'fuck 2 - '.b)
-"   call s:WarnMsg( 'fuck 3 - '.strpart(b1,a1))
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Parse the buffer and set the doc parameter.
